@@ -32,7 +32,17 @@ async def _request(path: str, *, json_body: dict[str, Any] | None = None,
     except httpx.HTTPError as exc:
         raise SarvamError("Could not reach Sarvam. Check your internet connection and try again.") from exc
     if response.status_code >= 400:
-        raise SarvamError("Sarvam could not process this request. Please try again with a short, clear recording.")
+        if response.status_code in (401, 403):
+            message = "Sarvam rejected the API key. Check SARVAM_API_KEY and confirm the key has API access."
+        elif response.status_code == 404:
+            message = "Sarvam could not find the requested endpoint or model. Check the configured Sarvam API endpoint and model."
+        elif response.status_code == 429:
+            message = "Sarvam rate limit or quota reached. Check your plan and try again later."
+        elif response.status_code >= 500:
+            message = "Sarvam is temporarily unavailable. Try again later."
+        else:
+            message = f"Sarvam rejected the request (HTTP {response.status_code}). Check the request parameters and try again."
+        raise SarvamError(message)
     try:
         return response.json()
     except ValueError as exc:

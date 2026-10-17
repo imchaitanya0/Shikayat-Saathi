@@ -4,7 +4,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -91,6 +91,11 @@ async def api_speak(request: SpeakRequest) -> Response:
     except SarvamError as exc:
         raise fail(exc)
     return Response(content=audio, media_type="audio/wav")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> RedirectResponse:
+    return RedirectResponse("/favicon.svg")
 
 
 app.mount("/", StaticFiles(directory=ROOT / "static", html=True), name="static")
