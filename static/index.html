@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shikayat Saathi</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #172033; background: #f5f7fb; }
+    body { max-width: 980px; margin: auto; padding: 24px; } h1 { margin-bottom: 0; }
+    .card { background: white; border-radius: 14px; padding: 18px; margin: 16px 0; box-shadow: 0 2px 12px #17203312; }
+    button { padding: 12px 16px; border: 0; border-radius: 9px; background: #1266dd; color: #fff; font-weight: 700; cursor: pointer; }
+    button:disabled { background: #9aa8bd; cursor: not-allowed; } textarea { width: 100%; min-height: 90px; box-sizing: border-box; padding: 10px; }
+    #status { font-weight: 700; color: #1266dd; min-height: 1.5em; } .hidden { display: none; }
+    table { width: 100%; border-collapse: collapse; } td { padding: 8px; border-bottom: 1px solid #e5e9f0; vertical-align: top; }
+    .missing { background: #fff2c7; } .letters { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+    pre { white-space: pre-wrap; font: inherit; } small { color: #556070; }
+  </style>
+</head>
+<body>
+  <h1>Shikayat Saathi</h1><p>Speak your problem. Get a clear grievance letter in your language.</p>
+  <div class="card"><p id="status" aria-live="polite">Ready. Hold the button and speak.</p><button id="record">Hold to speak</button></div>
+  <div class="card"><h2>Transcript</h2><textarea id="transcript" placeholder="Your speech will appear here."></textarea></div>
+  <div class="card hidden" id="factsCard"><h2>What we understood</h2><table id="facts"></table></div>
+  <div class="card hidden" id="questionCard"><h2>One quick question</h2><p id="question"></p><button id="answer">Hold to answer</button></div>
+  <div class="card hidden" id="lettersCard"><h2>Your draft letter</h2><div class="letters"><section><h3>English</h3><pre id="en"></pre><button data-copy="en">Copy</button></section><section><h3>Your language</h3><pre id="native"></pre><button data-copy="native">Copy</button></section></div><p><button id="read">Read my letter aloud</button></p><small>Draft only. Please review before sending.</small></div>
+  <script>
+    const $ = id => document.getElementById(id); let recorder, chunks = [], language = "unknown", analysis, transcript = "", followupUsed = false;
+    const status = text => $("status").textContent = text;
+    async function request(url, options) { const r = await fetch(url, options); if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || "Something went wrong. Please try again."); } return r; }
+    function record(button, answering) {
+      button.onpointerdown = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({audio:true}); chunks=[]; recorder=new MediaRecorder(stream); recorder.ondataavailable=e=>chunks.push(e.data); recorder.onstop=()=>sendAudio(answering, stream); recorder.start(); status("Recording… release when you finish."); } catch { status("Microphone access was not available. Please allow it and try again."); } };
+      button.onpointerup = button.onpointercancel = () => recorder?.state === "recording" && recorder.stop();
+    }
+    async function sendAudio(answering, stream) { stream.getTracks().forEach(t=>t.stop()); try { status("Transcribing…"); const blob = new Blob(chunks,{type:recorder.mimeType||"audio/webm"}); const form=new FormData(); form.append("file",blob,"recording.webm"); const data=await (await request("/api/transcribe",{method:"POST",body:form})).json(); language=data.language; if(answering){ transcript += "\n\nAdditional answer: " + data.transcript; $("transcript").value=transcript; followupUsed=true; await analyze(); } else { transcript=data.transcript; $("transcript").value=transcript; await analyze(); } } catch(e) { status(e.message); } }
+    async function analyze() { try { status("Understanding your complaint…"); transcript=$("transcript").value.trim(); const body={transcript,language,followup_used:followupUsed}; analysis=await (await request("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); language=analysis.language||language; showFacts(); if(analysis.followup_question_native && !followupUsed){ $("question").textContent=analysis.followup_question_native; $("questionCard").classList.remove("hidden"); await play(analysis.followup_question_native); status("Please answer the one question."); } else { $("questionCard").classList.add("hidden"); await letter(); } } catch(e) { status(e.message); } }
+    function showFacts(){ const fields=["category","department","location","since_when","what_happened","prior_attempts","desired_resolution"], table=$("facts"); table.replaceChildren(); fields.forEach(k=>{ const row=document.createElement("tr"), name=document.createElement("td"), value=document.createElement("td"); if(analysis.missing.includes(k)) row.className="missing"; name.textContent=k.replaceAll("_"," "); value.textContent=analysis[k]||"Not stated"; row.append(name,value); table.append(row); }); $("factsCard").classList.remove("hidden"); }
+    async function letter(){ try { status("Writing your letter…"); const result=await (await request("/api/letter",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({transcript,language,fields:analysis})})).json(); $("en").textContent=result.letter_en; $("native").textContent=result.letter_native; $("lettersCard").classList.remove("hidden"); status("Done. Please review the draft before sending."); } catch(e) { status(e.message); } }
+    async function play(text){ try { const r=await request("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,language})}); new Audio(URL.createObjectURL(await r.blob())).play(); } catch(e) { status("Text is ready, but audio could not play: "+e.message); } }
+    record($("record"),false); record($("answer"),true); $("read").onclick=()=>play($("native").textContent);
+    document.querySelectorAll("[data-copy]").forEach(b=>b.onclick=()=>navigator.clipboard.writeText($(b.dataset.copy).textContent).then(()=>status("Copied.")));
+  </script>
+</body>
+</html>
